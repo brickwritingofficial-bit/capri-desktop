@@ -292,7 +292,7 @@ namespace CapriDesktop
             preferences.CallAppName = label;
             CallApps.Choose(chosen, label);
             callSession.Change(CallModeOn);
-            lock (waking) { callAudio.Clear(); utterance = null; preroll.Clear(); pushedCall = null; }
+            lock (waking) { callAudio.Clear(); utterance = null; carrying = false; heldLine = null; heldCall = null; heldUnbroken = false; preroll.Clear(); pushedCall = null; }
             callCaptions.Clear();
             callCaptionRun = false;
             callWho = callSaid = null;
@@ -344,7 +344,7 @@ namespace CapriDesktop
             if (on) ResetCall(); else EndCallView();
             callSession.Change(on);
             if (micMix != null) micMix.Call = on;
-            lock (waking) { callAudio.Clear(); utterance = null; preroll.Clear(); }
+            lock (waking) { callAudio.Clear(); utterance = null; carrying = false; heldLine = null; heldCall = null; heldUnbroken = false; preroll.Clear(); }
             callCaptions.Clear();
             callCaptionRun = false;
             preferences.CallMode = on;
@@ -1473,6 +1473,7 @@ namespace CapriDesktop
             husk = new HuskWatch(data);
             husk.Clock = delegate { return clock.Elapsed.TotalSeconds; };
             husk.Language = delegate { return preferences.Language; };
+            husk.Verbose = delegate { return !preferences.NoHuskVerbosity; };
             husk.Dispatch = Post;
             husk.FindWindow = HuskWindow;
             husk.Show = delegate(HuskAct act)

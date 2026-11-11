@@ -710,6 +710,9 @@ namespace CapriDesktop
         internal static string DefaultId;
         internal static string WaveDefaultId;
         internal static Action<string> Missing;
+        // Her voice for Capri Remote's call (app/RemoteLive.cs): every line she plays, at her own level, and a cut-off.
+        internal static Action<short[], int> Tap;
+        internal static Action Hushed;
         internal static Func<List<Output>> Devices = ReadDevices;
         private static readonly object gate = new object();
         private static Func<List<Output>> listed;
@@ -977,6 +980,8 @@ namespace CapriDesktop
                 if (answer == null) BeginAnswer();
                 if (answer != null) answer.Give(samples.Length, rate);
                 MicMix.Hear(this, samples, rate, answer);
+                Action<short[], int> tap = Tap;
+                if (tap != null) tap(samples, rate);
                 samples = Voice.Louder(samples);
             }
             Send(samples);
@@ -1049,6 +1054,8 @@ namespace CapriDesktop
             if (device != IntPtr.Zero) waveOutReset(device);
             if (modern != null) modern.Clear();
             if (cut) { MicMix.Hush(this); EndAnswer(); }
+            Action hushed = Hushed;
+            if (cut && !Plain && hushed != null) hushed();
             Sweep();
             shapes.Clear();
             leftover.Clear();
@@ -2473,8 +2480,11 @@ namespace CapriDesktop
         private float[] floats = new float[0];
         private short[] shorts = new short[0];
         private int[] ints = new int[0];
+        private bool timed;
+        private long firstAt, firstPosition, nextPosition;
+        private readonly Func<long> clock;
 
-        private SoundTap(string device, ISoundClient client, ISoundCapture capture, int rate, int channels, int bits, bool isFloat)
+        internal SoundTap(string device, ISoundClient client, ISoundCapture capture, int rate, int channels, int bits, bool isFloat, Func<long> time = null)
         {
             Device = device;
             this.client = client;
@@ -2483,6 +2493,7 @@ namespace CapriDesktop
             Channels = channels;
             Bits = bits;
             Float = isFloat;
+            clock = time ?? delegate { return ClipBuffer.Now; };
         }
 
         internal string Format { get { return Rate + " Hz, " + Channels + " channels, " + Bits + "-bit " + (Float ? "float" : "PCM"); } }
@@ -2586,8 +2597,23 @@ namespace CapriDesktop
                             }
                     }
                     long duration = frames * 10000000L / Rate;
-                    if (time <= 0 || (flags & 4) != 0) time = (long)(Stopwatch.GetTimestamp() * (10000000.0 / Stopwatch.Frequency)) - duration;
-                    newest = time + duration;
+                    // Counting samples keeps blocks exactly end to end, but a sound card's clock isn't the PC's: over a long game
+                    // the count walks away from the real time. So the clock is set again from the packet's own time once it is
+                    // 20 ms out, or 3 ms out while the packet is silent, where the join can't be heard.
+                    if (timed && time > 0 && (flags & 4) == 0 && position >= nextPosition)
+                    {
+                        long off = Math.Abs(firstAt + (position - firstPosition) * 10000000 / Rate - time);
+                        if (off > 200000 || (silent && off > 30000)) timed = false;
+                    }
+                    if (!timed || position < nextPosition || ((flags & 1) != 0 && time > 0 && (flags & 4) == 0))
+                    {
+                        firstAt = time <= 0 || (flags & 4) != 0 ? clock() - duration : time;
+                        firstPosition = position;
+                        timed = true;
+                    }
+                    time = firstAt + (position - firstPosition) * 10000000 / Rate;
+                    nextPosition = position + frames;
+                    newest = firstAt + (position - firstPosition + frames) * 10000000 / Rate;
                     if (packet != null) pcm(packet, time, Rate);
                 }
                 finally { capture.ReleaseBuffer(frames); }

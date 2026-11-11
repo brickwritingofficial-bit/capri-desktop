@@ -141,11 +141,16 @@ namespace CapriDesktop
         private readonly Toggle followUps;
         private readonly Key huskMode;
         private readonly ContextMenuStrip huskMenu;
+        private readonly Key thinkingLevel;
+        private readonly ContextMenuStrip thinkingMenu;
+        private readonly Key thinkingExtra;
+        private ThinkingSheet thinkingSheet;
         private readonly Slider watchMemory;
         private readonly Readout watchMemoryName;
         private static readonly int[] WatchLines = { 8, 16, 24, 48, 96 };
         private static readonly string[] WatchLineNames = { "8 lines", "16 lines", "24 lines", "48 lines", "96 lines" };
         private readonly Toggle stayOnModel;
+        private readonly Toggle huskVerbosity;
         private readonly Toggle remembering;
         private readonly Toggle keepAwake, hideFullScreen, playerFullScreen, exploreAway;
         private Key clipsFolder;
@@ -279,7 +284,7 @@ namespace CapriDesktop
         // Simple Settings keeps Her voice in your mic's rows, between Free voice in games and MOVES.
         private static readonly int[][] FoldedLeft = { new[] { 232, 400 }, new[] { 478, 506 }, new[] { 728, 1205 }, new[] { 1316, 1368 }, new[] { 1368, 1396 } };
         // Power saver's row stays in Simple Settings, so the right column's last band starts a row lower, at Perch.
-        private static readonly int[][] FoldedRight = { new[] { 138, 362 }, new[] { 390, 418 }, new[] { 708, 1118 }, new[] { 1342, 2168 } };
+        private static readonly int[][] FoldedRight = { new[] { 138, 362 }, new[] { 390, 418 }, new[] { 708, 1202 }, new[] { 1426, 2252 } };
         private readonly Dictionary<Control, int> built = new Dictionary<Control, int>();
         private bool simple;
         private Key advancedKey;
@@ -602,11 +607,13 @@ namespace CapriDesktop
             support = Lower(Make("Support", 268, 183 + v, 88, 18, delegate { capri.OpenSupport(); }));
             support.Heart = true;
             support.AccessibleName = "Support Capri: opens Lachy's Ko-fi in your browser";
+            MakeRemoteKey(183 + v);
             // Her version sits where Mods was, beside Support, now Mods is up by Settings.
-            build = Lower(Caption("v" + version, 196, 183 + v, small, Faint));
+            build = Lower(Caption(version, 196, 183 + v, small, Faint));
             build.AutoSize = false;
             build.TextAlign = ContentAlignment.MiddleRight;
-            build.Bounds = new Rectangle(196, 183 + v, 66, 18);
+            // The Store copy's "Store 0.8.9" is wider, so it takes the gap up to Remote.
+            build.Bounds = Packaged.Is ? new Rectangle(190, 183 + v, 76, 18) : new Rectangle(196, 183 + v, 66, 18);
             showHide = Lower(Make("Hide Capri", 28, 206 + v, 104, 28, delegate { capri.ToggleHidden(); }));
             Lower(Make("Bring here", 140, 206 + v, 104, 28, delegate { capri.BringHere(); }));
             perch = Lower(Make("Ride cursor", 252, 206 + v, 104, 28, delegate { capri.TogglePerch(); }));
@@ -713,11 +720,19 @@ namespace CapriDesktop
             voiceInMic.Switch = 68;
             voiceInMic.AccessibleName = "Her voice plays into your mic only in call mode. Pick CABLE Output or Steam Streaming Microphone in your call app.";
             voiceInMicNote = Caption(MicMix.PickLine(MicMix.CableEnd), 28, MixAt + 26, small, Faint);
+            voiceInMicNote.AutoSize = false;
+            voiceInMicNote.AutoEllipsis = true;
+            voiceInMicNote.Size = new Size(328, 22);
+            ((Note)voiceInMicNote).Hovers = true;
             // Without a cable the note credits VB-CABLE, and opens its page, where they can donate.
             voiceInMicNote.Click += delegate { if (voiceInMicNote.Text == CableSetup.Credit) capri.OpenCablePage(); };
             voiceInMicState = Caption("", 28, MixAt + 50, small, Faint);
+            voiceInMicState.AutoSize = false;
+            voiceInMicState.AutoEllipsis = true;
+            voiceInMicState.Size = new Size(328, 22);
+            ((Note)voiceInMicState).Hovers = true;
             cableKey = Make("Get VB-CABLE", 244, MixAt + 76, 112, 22, delegate { capri.SetUpCable(); }, "Her voice in your mic");
-            cableKey.AccessibleName = Packaged.Is ? "Get VB-CABLE: opens VB-Audio's page, where you can get it. VB-CABLE is donationware from vb-cable.com" : "Get VB-CABLE: opens VB-Audio's own setup, which Windows asks you to let run. Click Install Driver in it, then restart your PC. VB-CABLE is donationware from vb-cable.com";
+            cableKey.AccessibleName = Packaged.Is ? "Get VB-CABLE: opens VB-Audio's page, where you can get it. VB-CABLE is donationware from vb-cable.com" : "Get VB-CABLE: opens VB-Audio's own setup, which Windows asks you to let run. Click Install Driver in it, then restart your PC if she asks. VB-CABLE is donationware from vb-cable.com";
             cableKey.Visible = false;
             mixInputMenu = Dropdown();
             mixInputMenu.Closed += delegate { mixInputsWaiting = false; };
@@ -863,7 +878,25 @@ namespace CapriDesktop
                 int choice = HuskWatch.Modes[i];
                 huskMenu.Items.Add(Choice(HuskWatch.Names[i], false, delegate { capri.SetHusk(choice); }));
             }
+            Named("Thinking", c, 382);
+            thinkingMenu = Dropdown();
+            thinkingMenu.AccessibleName = "Thinking choices";
+            thinkingMenu.Opening += delegate { FillThinking(); };
+            thinkingLevel = Make(ThinkingLevels.Names[0], ValueAt + c, 385, ValueWide, 22, delegate { thinkingMenu.Show(thinkingLevel, new Point(0, thinkingLevel.Height)); }, "Thinking");
+            thinkingLevel.Chevron = true;
+            thinkingLevel.AccessibleName = "Thinking";
+            for (int i = 0; i < ThinkingLevels.Names.Length; i++)
+            {
+                int level = i;
+                thinkingMenu.Items.Add(Choice(ThinkingLevels.Names[i], false, delegate { capri.SetThinking(level); }));
+            }
+            Named("Extra request JSON", c, 410);
+            thinkingExtra = Make("Add", ValueAt + c, 413, ValueWide, 22, delegate { OpenThinkingExtra(); }, "Extra request JSON");
+            thinkingExtra.AccessibleName = "Extra request JSON";
             int afterHusk = Controls.Count;
+            huskVerbosity = Switch("Verbosity", c, 354, delegate { if (!syncing) capri.ToggleHuskVerbosity(); });
+            huskVerbosity.AccessibleName = "Verbosity. On shows each tool the coding assistant runs. Off keeps only starts, finishes, questions and crashes";
+            int afterVerbosity = Controls.Count;
             stayOnModel = Switch("Stay on my model", c, 354, delegate { if (!syncing) capri.ToggleStayOnModel(); });
             stayOnModel.AccessibleName = "Stay on my model. When an NVIDIA model gets stuck she says so instead of switching to another one";
             replies = Setting("Replies", Lengths, c, 382, "Reply length");
@@ -993,7 +1026,9 @@ namespace CapriDesktop
             for (int talkSettingAt = afterWatchMemory; talkSettingAt < Controls.Count; talkSettingAt++)
                 Controls[talkSettingAt].Top += (talkSettingAt >= afterFollowUps ? 56 : 28) + (Controls[talkSettingAt].Left >= c ? Row : 0);
             for (int huskRow = afterHusk; huskRow < Controls.Count; huskRow++)
-                if (Controls[huskRow].Left >= c) Controls[huskRow].Top += Row;
+                if (Controls[huskRow].Left >= c) Controls[huskRow].Top += Row * 3;
+            for (int belowVerbosity = afterVerbosity; belowVerbosity < Controls.Count; belowVerbosity++)
+                if (Controls[belowVerbosity].Left >= c) Controls[belowVerbosity].Top += Row;
             // Mainframe colours, Head pats, Chaos when upset, Hologram and Legacy stand each take a row under Mainframe size.
             for (int belowPats = afterPats; belowPats < Controls.Count; belowPats++)
                 if (Controls[belowPats].Left >= c) Controls[belowPats].Top += Row * 5;
@@ -1538,7 +1573,7 @@ namespace CapriDesktop
             syncing = was;
             voiceInMicNote.Text = cable ? MicMix.PickLine(capri.CableEnd) : CableSetup.Credit;
             voiceInMicNote.Cursor = cable ? Cursors.Default : Cursors.Hand;
-            voiceInMicState.Text = !vb && setup != null ? setup : !cable ? MicMix.Missing : on && problem != null ? problem : capri.CableFarOff ? MicMix.OffLine(capri.CableEnd) : "";
+            voiceInMicState.Text = setup != null ? setup : problem != null ? problem : !cable ? MicMix.Missing : capri.CableFarOff ? MicMix.OffLine(capri.CableEnd) : "";
             voiceInMicState.ForeColor = cable ? Hot : Faint;
             // Visible reads false while Settings isn't on screen, so the width goes by what it was set to.
             cableOffered = !vb && !capri.CableSetupOpen;
@@ -1623,7 +1658,7 @@ namespace CapriDesktop
             foreach (Companion.MixChoice cable in cables)
             {
                 string id = cable.Cable.Id;
-                vb |= !MicMix.IsSteam(cable.Cable.Name);
+                vb |= MicMix.IsVb(cable.Cable.Name);
                 mixOutputMenu.Items.Add(Choice(cable.Name, id == chosen, delegate { mixOutputsWaiting = false; capri.ChooseMixOutput(id); }));
             }
             if (!vb)
@@ -1699,7 +1734,9 @@ namespace CapriDesktop
             if (voiceInMicNote.Top < voiceInMic.Bottom || voiceInMicState.Top < voiceInMicNote.Bottom) return "the note or the line overlaps the row above it";
             if (cableKey.Visible && (cableKey.Left < mixInput.Right + Scaled(4) || cableKey.Top < voiceInMicState.Bottom || TextRenderer.MeasureText(cableKey.Text, cableKey.Font).Width + Scaled(12) > cableKey.Width)) return "the button covers Input or doesn't fit";
             if (mixInput.Top < voiceInMicState.Bottom || mixOutput.Top < Math.Max(mixInput.Bottom, cableKey.Bottom) || mixHow.Top < mixInput.Bottom || mixHow.Left < mixOutput.Right) return "Input, Output or How to overlaps a row";
-            foreach (string line in new[] { MicMix.Missing, CableSetup.Finish, CableSetup.Declined, CableSetup.Failed, CableSetup.Running, MicMix.Unopened, MicMix.NoMic, MicMix.MicGone, MicMix.MutedLine(MicMix.CableEnd), MicMix.MutedLine(MicMix.SteamEnd), MicMix.OffLine(MicMix.CableEnd), MicMix.OffLine(MicMix.SteamEnd) })
+            List<string> cableLines = new List<string>(CableSetup.Lines);
+            cableLines.AddRange(new[] { MicMix.Missing, MicMix.Unopened, MicMix.ListFailed, MicMix.NoMic, MicMix.MicGone, MicMix.MutedLine(MicMix.CableEnd), MicMix.MutedLine(MicMix.SteamEnd), MicMix.OffLine(MicMix.CableEnd), MicMix.OffLine(MicMix.SteamEnd) });
+            foreach (string line in cableLines)
                 if (voiceInMicState.Left + TextRenderer.MeasureText(line, voiceInMicState.Font).Width > column) return "\"" + line + "\" doesn't fit";
             foreach (string note in new[] { MicMix.PickLine(MicMix.CableEnd), MicMix.PickLine(MicMix.SteamEnd), CableSetup.Credit, CableSetup.Better })
                 if (voiceInMicNote.Left + TextRenderer.MeasureText(note, voiceInMicNote.Font).Width > column) return "\"" + note + "\" doesn't fit";
@@ -2797,6 +2834,7 @@ namespace CapriDesktop
                 huskMenu.Items[i].Visible = i < HuskWatch.Choices(capri.HuskMode).Length;
             }
             huskMode.Invalidate();
+            FillThinking();
             hearingChoice.Text = HearingStatus.Choices[capri.HearingChoice];
             hearingChoice.AccessibleName = "Hearing: " + hearingChoice.Text;
             for (int i = 0; i < hearingMenu.Items.Count; i++) ((ToolStripMenuItem)hearingMenu.Items[i]).Checked = i == capri.HearingChoice;
@@ -2823,6 +2861,7 @@ namespace CapriDesktop
             watchMemory.Value = Math.Max(0, Array.IndexOf(WatchLines, capri.WatchMemoryLines));
             watchMemoryName.Text = WatchLineNames[watchMemory.Value];
             stayOnModel.Checked = capri.StayOnModel;
+            huskVerbosity.Checked = capri.HuskVerbosity;
             remembering.Checked = capri.Remembers;
             keepAwake.Checked = capri.KeepAwake;
             hideFullScreen.Checked = capri.HideFullScreen;
@@ -2958,6 +2997,7 @@ namespace CapriDesktop
         internal void FlipCaughtUp() { caughtUp.Checked = !caughtUp.Checked; }
 
         internal bool StayShown { get { return stayOnModel.Checked; } }
+        internal bool HuskVerbosityShown { get { return huskVerbosity.Checked; } }
 
         internal void FlipStay() { stayOnModel.Checked = !stayOnModel.Checked; }
 
@@ -2990,6 +3030,20 @@ namespace CapriDesktop
         internal void FlipCare(CareKind kind) { careToggles[(int)kind].Checked = !careToggles[(int)kind].Checked; }
 
         internal void FlipCheckIns() { checkIns.Checked = !checkIns.Checked; }
+
+        internal string BrainFits()
+        {
+            if (!paged) return null;
+            Control above = null;
+            foreach (Control row in new Control[] { huskMode, thinkingLevel, thinkingExtra, huskVerbosity, stayOnModel, replies, recall, memorySize, replyLength, bubble, followUps })
+            {
+                if (Hidden(row) != simple || row.TabStop == simple) return "a BRAIN row has the wrong Settings view";
+                if (!simple && above != null && Math.Abs(row.Top - above.Top - Scaled(Row)) > 1) return "a BRAIN row is out of place";
+                above = row;
+            }
+            if (Hidden(watchMemory) != simple || Hidden(frameColours) || Hidden(headPats)) return "Settings folds the wrong rows above BRAIN";
+            return null;
+        }
 
         internal string CareFits()
         {
@@ -3511,6 +3565,49 @@ namespace CapriDesktop
         }
 
         internal void PickBrain(int index) { ((ToolStripMenuItem)modelMenu.Items[index]).PerformClick(); }
+
+        // Thinking is always about the brain she's on, so a new brain or model refills its row and greys what that model can't take.
+        private void FillThinking()
+        {
+            int level = capri.ThinkingLevel;
+            thinkingLevel.Text = ThinkingLevels.Names[level];
+            for (int i = 0; i < thinkingMenu.Items.Count; i++)
+            {
+                ToolStripMenuItem row = (ToolStripMenuItem)thinkingMenu.Items[i];
+                string why = capri.ThinkingWhy(i);
+                string text = why == null ? ThinkingLevels.Names[i] : ThinkingLevels.Names[i] + " · " + why;
+                if (row.Text != text) row.Text = text;
+                row.Enabled = why == null;
+                row.Checked = i == level;
+            }
+            thinkingLevel.Invalidate();
+            thinkingExtra.Text = capri.ThinkingExtra == null ? "Add" : "Edit";
+            thinkingExtra.Enabled = capri.ThinkingOpen;
+            thinkingExtra.Invalidate();
+            if (thinkingSheet != null && !thinkingSheet.IsDisposed && thinkingSheet.Source != capri.ThinkingSource) thinkingSheet.Fill();
+        }
+
+        internal void OpenThinkingExtra()
+        {
+            if (thinkingSheet != null && !thinkingSheet.IsDisposed && thinkingSheet.Zoom != zoom) thinkingSheet.Close();
+            if (thinkingSheet == null || thinkingSheet.IsDisposed) thinkingSheet = new ThinkingSheet(this, zoom);
+            thinkingSheet.Fill();
+            if (!thinkingSheet.Visible) thinkingSheet.Show(this);
+            else thinkingSheet.Activate();
+        }
+
+        internal string ThinkingShown { get { return thinkingLevel.Text; } }
+        internal string ThinkingRow(int level) { return thinkingMenu.Items[level].Text; }
+        internal bool ThinkingRowOpen(int level) { return thinkingMenu.Items[level].Enabled; }
+        internal void PickThinking(int level) { ((ToolStripMenuItem)thinkingMenu.Items[level]).PerformClick(); }
+        internal string ThinkingExtraKey { get { return thinkingExtra.Text; } }
+        internal bool ThinkingExtraOpen { get { return thinkingExtra.Enabled; } }
+        internal bool ThinkingTip { get { return hints.ContainsKey(thinkingLevel) && hints.ContainsKey(thinkingExtra); } }
+        internal void TypeThinkingExtra(string text) { thinkingSheet.Type(text); }
+        internal void SaveThinkingExtra() { thinkingSheet.Save(); }
+        internal string ThinkingExtraNote { get { return thinkingSheet == null || thinkingSheet.IsDisposed ? "" : thinkingSheet.Status; } }
+        internal string ThinkingExtraCrowded { get { return thinkingSheet.Crowded(); } }
+        internal void CloseThinkingExtra() { if (thinkingSheet != null && !thinkingSheet.IsDisposed) thinkingSheet.Close(); }
 
         // The cloud brain and list her model menu was last built from.
         private Cloud menuRemote;
@@ -4883,6 +4980,18 @@ namespace CapriDesktop
             internal bool Loud;
             internal bool Picked;
             internal bool StateValue;
+            // What a screen reader hears as its value, like Remote on, 1 phone, so its description can stay its tip.
+            private string status;
+            internal string Status
+            {
+                get { return status; }
+                set
+                {
+                    if (value == status) return;
+                    status = value;
+                    AccessibilityNotifyClients(AccessibleEvents.ValueChange, -1);
+                }
+            }
             internal bool Chevron;
             internal int Glyph;
             internal double Meter = -1;
@@ -4909,7 +5018,7 @@ namespace CapriDesktop
 
                 internal KeyAccess(Key owner) : base(owner) { key = owner; }
 
-                public override string Value { get { return key.StateValue ? key.Picked ? "On" : "Off" : base.Value; } set { base.Value = value; } }
+                public override string Value { get { return key.Status ?? (key.StateValue ? key.Picked ? "On" : "Off" : base.Value); } set { base.Value = value; } }
 
                 public override AccessibleStates State { get { return base.State | (key.StateValue && key.Picked ? AccessibleStates.Checked : AccessibleStates.None); } }
             }
@@ -5049,7 +5158,7 @@ namespace CapriDesktop
                 float s = Unit();
                 int left = (int)(10 * s);
                 int right = (int)((Chevron ? 28 : 10) * s);
-                int height = Box.PreferredHeight;
+                int height = Box.Multiline ? Height - left * 2 : Box.PreferredHeight;
                 Box.SetBounds(left, (Height - height) / 2, Math.Max(1, Width - left - right), height);
             }
 
@@ -5723,6 +5832,125 @@ namespace CapriDesktop
             }
         }
 
+        // Extra request JSON for the brain she's on, merged into each request it sends.
+        private sealed class ThinkingSheet : Form, LookWindow
+        {
+            private readonly Mainframe owner;
+            private readonly Entry extra;
+            private readonly Label note;
+            internal readonly float Zoom;
+            internal string Source;
+
+            internal ThinkingSheet(Mainframe owner, float zoom)
+            {
+                SuspendLayout();
+                this.owner = owner;
+                Zoom = zoom;
+                Text = "Extra request JSON";
+                Icon = owner.Icon;
+                ShowInTaskbar = false;
+                FormBorderStyle = FormBorderStyle.None;
+                StartPosition = FormStartPosition.Manual;
+                AutoScaleMode = AutoScaleMode.None;
+                Font = Mainframe.Type(9.5f);
+                BackColor = Ground;
+                ForeColor = White;
+                DoubleBuffered = true;
+                ClientSize = new Size(Wide, 356);
+                Heading(this, "EXTRA REQUEST JSON >", new Point(24, 15), Display(14f), Rose, 0);
+                Key close = Make("", 330, 20, 26, delegate { Close(); });
+                close.Height = 22;
+                close.Glyph = 2;
+                close.AccessibleName = "Close";
+                CancelButton = close;
+                Caption("One JSON object, added to every request this brain sends. It replaces Capri's value for any name it shares, and isn't checked against the model.", 52, 54, Faint);
+                extra = new Entry { Bounds = new Rectangle(28, 112, 328, 160) };
+                extra.Box.Multiline = true;
+                extra.Box.AcceptsReturn = true;
+                extra.Box.ScrollBars = ScrollBars.Vertical;
+                extra.Box.AccessibleName = extra.AccessibleName = "Extra request JSON";
+                Controls.Add(extra);
+                Key save = Make("Save", 28, 282, 160, delegate { Save(); });
+                save.Accent = Cyan;
+                save.Loud = true;
+                Key clear = Make("Clear", 196, 282, 160, delegate { extra.Box.Clear(); Save(); });
+                clear.Accent = Hot;
+                note = Caption("", 316, 34, Faint);
+                FormClosed += delegate { extra.Box.Clear(); };
+                if (zoom != 1f) { Grow(this, zoom); Scale(new SizeF(zoom, zoom)); }
+                owner.Fit(this);
+            }
+
+            internal void Fill()
+            {
+                Source = owner.capri.ThinkingSource;
+                extra.Box.Text = owner.capri.ThinkingExtra ?? "";
+                note.Text = "For " + Source.Substring(Source.IndexOf('|') + 1) + ".";
+            }
+
+            internal void Type(string text) { extra.Box.Text = text; }
+
+            internal void Save()
+            {
+                string problem = owner.capri.SetThinkingExtra(extra.Box.Text);
+                note.Text = problem ?? (extra.Box.Text.Trim().Length == 0 ? "Cleared." : "Saved.");
+            }
+
+            internal string Status { get { return note.Text; } }
+
+            internal string Crowded()
+            {
+                for (int first = 0; first < Controls.Count; first++)
+                {
+                    Control a = Controls[first];
+                    if (!ClientRectangle.Contains(a.Bounds)) return "an extra JSON row leaves the panel";
+                    for (int second = first + 1; second < Controls.Count; second++)
+                        if (a.Bounds.IntersectsWith(Controls[second].Bounds)) return "extra JSON rows overlap";
+                }
+                return null;
+            }
+
+            private Label Caption(string text, int y, int height, Color colour)
+            {
+                Label made = new Note { Text = text, ForeColor = colour, BackColor = Ground, Bounds = new Rectangle(28, y, 328, height) };
+                Controls.Add(made);
+                return made;
+            }
+
+            private Key Make(string text, int x, int y, int width, EventHandler click)
+            {
+                Key made = new Key { Text = text, Font = Mainframe.Type(9f, true), Bounds = new Rectangle(x, y, width, 28) };
+                made.Click += click;
+                Controls.Add(made);
+                return made;
+            }
+
+            protected override void OnLoad(EventArgs e)
+            {
+                base.OnLoad(e);
+                float s = ScaleOf(this);
+                Rectangle area = Screen.FromControl(owner).WorkingArea;
+                int x = owner.Left + (owner.Width - Width) / 2, y = owner.Top + (int)(48 * s);
+                Location = new Point(Math.Max(area.Left, Math.Min(area.Right - Width, x)), Math.Max(area.Top, Math.Min(area.Bottom - Height, y)));
+            }
+
+            protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); Clip(this, ScaleOf(this)); Invalidate(true); }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                Backdrop(e.Graphics, this, ScaleOf(this));
+                Edging(e.Graphics, this, ScaleOf(this));
+            }
+
+            protected override void WndProc(ref Message message)
+            {
+                base.WndProc(ref message);
+                if (message.Msg == 0x0084 && message.Result == new IntPtr(1)) message.Result = new IntPtr(2);
+            }
+        }
+
         // A voice model for CUSTOM LOCAL or CLOUD VOICE: a ready-made choice like Fish Audio, or their own server. Its address, an
         // optional model, voice and key, Test, and Use this server.
         private sealed class ServerSheet : Form, LookWindow
@@ -6233,7 +6461,7 @@ namespace CapriDesktop
         // where Blackwall mode was. Zoom is 1 except in the smoke test, which draws it at 150% and 200% too.
         private sealed class SecuritySheet : Form, LookWindow, Tinted
         {
-            internal const int Wide = 900, Tall = 562, Column = 410;
+            internal const int Wide = 900, Tall = 590, Column = 410;
             internal readonly float Zoom;
             private readonly Mainframe owner;
             private readonly Slider presets;
@@ -6284,10 +6512,11 @@ namespace CapriDesktop
                 Heading(this, "HER JOBS >", new Point(Z(52 + Column), Z(144)), head, White, Column + 14);
                 Heading(this, "LISTENING >", new Point(Z(52 + Column), Z(362)), head, White, Column + 14);
                 Heading(this, "HER MEMORY >", new Point(Z(28), Z(454)), head, White, Column + 14);
+                Heading(this, "HER MODS >", new Point(Z(52 + Column), Z(498)), head, White, Column + 14);
                 for (int i = 0; i < Security.Count; i++)
                 {
                     int x = i <= Security.Mouse || i == Security.Personal ? 28 : 52 + Column;
-                    int y = i == Security.Personal ? 478 : i <= Security.Mouse ? 168 + 46 * i : i < Security.Wake ? 168 + 46 * (i - Security.Sends) : 386 + 46 * (i - Security.Wake);
+                    int y = i == Security.ModTools ? 522 : i == Security.Personal ? 478 : i <= Security.Mouse ? 168 + 46 * i : i < Security.Wake ? 168 + 46 * (i - Security.Sends) : 386 + 46 * (i - Security.Wake);
                     int toggle = i;
                     Toggle box = new Toggle();
                     box.Text = Security.Names[i];
@@ -6963,17 +7192,28 @@ namespace CapriDesktop
                 output.Chevron = true;
                 output.AccessibleName = "Output: the virtual mic she plays into, which your call app hears";
                 state = Caption("", 28, 174, Font, Faint);
+                state.AutoSize = false;
+                state.AutoEllipsis = true;
+                state.Size = new Size(Z(Wide - 56), Z(22));
+                ((Note)state).Hovers = true;
                 callHead = Heading(this, "IN DISCORD >", new Point(Z(28), Z(208)), head, White, Wide - 28);
                 steps = new Label[5];
                 steps[0] = Caption("", 28, 240, Font, White);
                 pickStep = Caption("2   Input Device:", 28, 266, Font, White);
                 pick = Caption("", 28, 266, Font, Cyan);
+                pick.AutoSize = false;
+                pick.AutoEllipsis = true;
+                ((Note)pick).Hovers = true;
                 steps[1] = Caption("", 28, 292, Font, White);
                 steps[2] = Caption("", 28, 318, Font, White);
                 steps[3] = Caption("", 28, 344, Font, White);
                 steps[4] = Caption("", 28, 370, Font, White);
                 live = Caption("", 28, 404, Font, Faint);
                 elsewhere = Caption("", 28, 438, Font, Faint);
+                elsewhere.AutoSize = false;
+                elsewhere.AutoEllipsis = true;
+                elsewhere.Size = new Size(Z(Wide - 56), Z(22));
+                ((Note)elsewhere).Hovers = true;
                 // Every second it asks again who hears her. Her looks at Windows run in the background, so it never waits (#100).
                 ticks.Interval = 1000;
                 ticks.Tick += delegate { Sync(); };
@@ -7045,14 +7285,15 @@ namespace CapriDesktop
                 Retext(output, cable ? far : NoOutput);
                 Retext(pick, far);
                 pick.Left = pickStep.Right + (int)Math.Round(4 * ScaleOf(this));
+                pick.Size = new Size(Math.Max(1, Z(Wide - 28) - pick.Left), Z(22));
                 Retext(elsewhere, "Roblox or any other app: pick " + far + " as its mic.");
                 string said;
                 Color colour = Hot;
-                if (!vb && setup != null) said = setup;
+                if (setup != null) said = setup;
+                else if (problem != null) said = problem;
                 else if (!cable) said = NoCable;
                 else if (there.Far == null) said = MicMix.OffLine(MicMix.EndOf(there));
                 else if (!on) said = Off;
-                else if (problem != null) said = problem;
                 else { said = "On: your mic and her voice are going in."; colour = Cyan; }
                 Retext(state, said);
                 state.ForeColor = colour;
@@ -7121,7 +7362,9 @@ namespace CapriDesktop
                 string vb = "CABLE Output (VB-Audio Virtual Cable)";
                 foreach (string text in new[] { NoOutput, vb, "Microphone (" + MicMix.SteamEnd + ")" })
                     if (TextRenderer.MeasureText(text, output.Font).Width + (int)Math.Ceiling(28 * s) > output.Width) return "doesn't fit: " + text + " in Output";
-                foreach (string line in new[] { "2   Input Device: " + vb, "Roblox or any other app: pick " + vb + " as its mic.", NoCable,CableSetup.Finish, CableSetup.Declined, CableSetup.Failed, CableSetup.Running, MicMix.Unopened, MicMix.NoMic, MicMix.MicGone, MicMix.MutedLine(MicMix.CableEnd), MicMix.MutedLine(MicMix.SteamEnd), MicMix.OffLine(MicMix.CableEnd), MicMix.OffLine(MicMix.SteamEnd), Off, "Discord, OBS and Roblox hear it now.", "OBS and Roblox hear it now. Discord doesn't yet.", NotYet })
+                List<string> cableLines = new List<string>(CableSetup.Lines);
+                cableLines.AddRange(new[] { "2   Input Device: " + vb, "Roblox or any other app: pick " + vb + " as its mic.", NoCable, MicMix.Missing, MicMix.Unopened, MicMix.ListFailed, MicMix.NoMic, MicMix.MicGone, MicMix.MutedLine(MicMix.CableEnd), MicMix.MutedLine(MicMix.SteamEnd), MicMix.OffLine(MicMix.CableEnd), MicMix.OffLine(MicMix.SteamEnd), Off, "Discord, OBS and Roblox hear it now.", "OBS and Roblox hear it now. Discord doesn't yet.", NotYet });
+                foreach (string line in cableLines)
                     if (state.Left + TextRenderer.MeasureText(line, Font).Width + (int)(24 * s) > ClientSize.Width - (int)(16 * s)) return "doesn't fit: " + line;
                 return null;
             }

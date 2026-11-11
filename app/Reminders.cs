@@ -26,6 +26,16 @@ namespace CapriDesktop
             kept = Path.GetFileNameWithoutExtension(path) + ".unreadable.json";
         }
 
+        private static Exception CopyUnreadable(string path, string kept)
+        {
+#if CROSS
+            try { File.Copy(path, Path.Combine(Path.GetDirectoryName(path), kept), true); return null; }
+            catch (Exception error) { return error; }
+#else
+            return Companion.CopyUnreadable(path, kept);
+#endif
+        }
+
         internal List<T> Read(Predicate<T> readable)
         {
             if (!File.Exists(path)) return new List<T>();
@@ -37,13 +47,18 @@ namespace CapriDesktop
             int count = saved.Count;
             saved.RemoveAll(item => item == null || !readable(item));
             if (error == null && saved.Count == count) return saved;
-            Exception copying = Companion.CopyUnreadable(path, kept);
+            Exception copying = CopyUnreadable(path, kept);
             uncopied = copying != null;
             // Only the kind of error goes in errors.txt: its message can quote the file.
             Brain.Log("startup", -1, Path.GetFileName(path) + (error == null ? " had entries she couldn't read" : " couldn't be read (" + error.GetType().Name + ")")
                 + (uncopied ? " or copied (" + copying.GetType().Name + "), so she won't save over it until she can copy it." : ". The old file is kept as " + kept + "."));
             note = (saved.Count == 0 ? "Your saved " + label + " couldn't be read, so I started a new list." : "Some of your saved " + label + " couldn't be read, so I kept the rest.")
-                + (uncopied ? " I couldn't keep a copy of the old file yet, so I won't save over it until I can." : " The old file is kept as " + kept + " in %LocalAppData%\\Capri.");
+                + (uncopied ? " I couldn't keep a copy of the old file yet, so I won't save over it until I can." : " The old file is kept as " + kept +
+#if CROSS
+                    " in " + Path.GetDirectoryName(path) + ".");
+#else
+                    " in %LocalAppData%\\Capri.");
+#endif
             return saved;
         }
 
@@ -51,7 +66,7 @@ namespace CapriDesktop
         {
             if (uncopied)
             {
-                if (Companion.CopyUnreadable(path, kept) != null) throw new IOException("Couldn't keep a copy of your old " + Path.GetFileName(path) + ", so I didn't save over it. Try again in a moment.");
+                if (CopyUnreadable(path, kept) != null) throw new IOException("Couldn't keep a copy of your old " + Path.GetFileName(path) + ", so I didn't save over it. Try again in a moment.");
                 uncopied = false;
             }
             Directory.CreateDirectory(Path.GetDirectoryName(path));
@@ -74,7 +89,6 @@ namespace CapriDesktop
         [DataMember] public string Text;
         [DataMember] public string When;
         [DataMember] public bool Said;
-        internal bool Late;
 
         internal DateTime Due { get { return DateTime.ParseExact(When, "o", CultureInfo.InvariantCulture, DateTimeStyles.None); } }
     }
@@ -104,7 +118,6 @@ namespace CapriDesktop
             {
                 DateTime due;
                 if (string.IsNullOrWhiteSpace(reminder.Text) || !DateTime.TryParseExact(reminder.When, "o", CultureInfo.InvariantCulture, DateTimeStyles.None, out due)) return false;
-                reminder.Late = !reminder.Said && due <= started;
                 return true;
             });
             routines = routinesFile.Read(routine => Key(routine.Phrase).Length > 0 && !string.IsNullOrWhiteSpace(routine.Steps));
@@ -146,6 +159,11 @@ namespace CapriDesktop
             }
         }
 
+        internal bool Waiting(DateTime now)
+        {
+            lock (gate) return reminders.Exists(reminder => !reminder.Said && reminder.Due <= now);
+        }
+
         internal string Take(DateTime now)
         {
             lock (gate)
@@ -157,8 +175,24 @@ namespace CapriDesktop
                 next.Said = true;
                 try { remindersFile.Write(reminders, ".new"); }
                 catch { next.Said = false; throw; }
-                return next.Late ? "Late reminder, due " + next.Due.ToString("f") + ": " + next.Text : "Reminder: " + next.Text;
+                string line = "Reminder: " + next.Text;
+                string overdue = Overdue(next.Due, now);
+                return overdue == null ? line : line + (Regex.IsMatch(line, @"[.!?]$") ? " " : ". ") + overdue;
             }
+        }
+
+        // Minutes while it's still the same sitting, hours within the day, and the date after that: "1440 minutes ago" helps nobody.
+        internal static string Overdue(DateTime due, DateTime now)
+        {
+            TimeSpan late = now - due;
+            if (late.TotalMinutes <= 1) return null;
+            if (late.TotalMinutes < 90)
+            {
+                int minutes = (int)late.TotalMinutes;
+                return "That was due " + minutes.ToString(CultureInfo.InvariantCulture) + (minutes == 1 ? " minute" : " minutes") + " ago.";
+            }
+            if (late.TotalHours < 24) return "That was due about " + ((int)Math.Round(late.TotalHours)).ToString(CultureInfo.InvariantCulture) + " hours ago.";
+            return "That was due " + due.ToString("f") + ".";
         }
 
         internal string Routine(ToolArguments args) { return routinesFile.Told(RoutineReply(args)); }
